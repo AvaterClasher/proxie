@@ -1,8 +1,8 @@
-s:
-	go run server.go
-	
-c:
-	go run client.go
-
-p:
+pc:
 	go run proxy.go
+
+ps:
+	go run proxy_server.go
+
+test:
+	go run test.go

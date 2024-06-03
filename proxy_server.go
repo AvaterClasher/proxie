@@ -4,38 +4,103 @@ import (
     "net/http"
     "io"
     "fmt"
-    "strings"
+    "os"
+    "bufio"
+    "log"
+    "strconv"
 )
 
-func Redir(w http.ResponseWriter, r *http.Request) {
-    // strip: /proxy/www.google.com -> www.google.com
-    request_path := strings.TrimPrefix(r.URL.Path, "/proxy/")
-    // append http://
-    request_path = fmt.Sprintf("http://%s", request_path)
+type Proxy struct {
+    BlockedSites map[string]string
+    port int
+}
 
-    // create new HTTP request with the target URL (everything else is the same)
-    new_request, err := http.NewRequest(r.Method, request_path, r.Body)
+func CreateProxy(port int) *Proxy {
+    rv := new(Proxy)
+    rv.BlockedSites = make(map[string]string)
+    rv.port = port
+    return rv
+}
 
-    // send request to server
-    fmt.Printf("Sending HTTP %s request to %s\n", r.Method, request_path)
+func (p *Proxy) ReadConfig(path string) {
+    file, err := os.Open(path)
+    if err != nil {
+        log.Fatalf("Error opening config file: %v", err)
+    }
+    defer file.Close()
 
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        site := scanner.Text()
+        p.BlockedSites[site] = site
+    }
+
+    if err := scanner.Err(); err != nil {
+        log.Fatalf("Error reading config file: %v", err)
+    }
+}
+
+func (p *Proxy) StartServer() {
+    http.HandleFunc("/", p.HandleRequest)
+    port := fmt.Sprintf(":%d", p.port)
+    log.Printf("Starting server on port %d", p.port)
+    if err := http.ListenAndServe(port, nil); err != nil {
+        log.Fatalf("Error starting server: %v", err)
+    }
+}
+
+func (p *Proxy) HandleRequest(w http.ResponseWriter, r *http.Request) {
+    _, blocked := p.BlockedSites[r.URL.Host]
+    if blocked {
+        log.Println("Blocked site!")
+        http.Error(w, "Blocked site!", http.StatusForbidden)
+        return
+    }
+
+    requestPath := fmt.Sprintf("%s://%s%s", r.URL.Scheme, r.URL.Host, r.URL.Path)
+    newRequest, err := http.NewRequest(r.Method, requestPath, r.Body)
+    if err != nil {
+        log.Printf("Error creating new request: %v", err)
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+        return
+    }
+
+    log.Printf("Sending %s request to %s\n", r.Method, requestPath)
     client := &http.Client{}
-    res, err := client.Do(new_request)
+    res, err := client.Do(newRequest)
     if err != nil {
-        fmt.Println(err)
+        log.Printf("Error sending request: %v", err)
+        http.Error(w, "Error forwarding request", http.StatusBadGateway)
         return
+    }
+    defer res.Body.Close()
+
+    for key, slice := range res.Header {
+        for _, val := range slice {
+            w.Header().Add(key, val)
+        }
     }
 
-    // forward response to client
-    body, err := io.ReadAll(res.Body)
-    if err != nil {
-        fmt.Println(err)
-        return
+    if _, err := io.Copy(w, res.Body); err != nil {
+        log.Printf("Error copying response body: %v", err)
+        http.Error(w, "Error copying response body", http.StatusInternalServerError)
     }
-    fmt.Fprintf(w, string(body))
 }
 
 func main() {
-    http.HandleFunc("/proxy/", Redir)
-    http.ListenAndServe(":8080", nil)
+    args := os.Args
+    if len(args) != 2 {
+        fmt.Println("Arguments: [port]")
+        return
+    }
+
+    port, err := strconv.Atoi(args[1])
+    if err != nil {
+        fmt.Println("[port] must be an integer!")
+        return
+    }
+
+    p := CreateProxy(port)
+    p.ReadConfig("blocked.txt")
+    p.StartServer()
 }

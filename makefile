@@ -1,5 +1,5 @@
 pc:
-	go run proxy.go
+	go run proxy_client.go
 
 ps:
 	go run proxy_server.go

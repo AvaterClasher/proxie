@@ -1,8 +1,9 @@
-pc:
-	go run proxy_client.go
+build:
+	go build -o proxie -v
 
-ps:
-	go run proxy_server.go
+clean:
+	go clean
+	rm -f proxie
 
-test:
-	go run test.go
+format:
+	go fmt ./...

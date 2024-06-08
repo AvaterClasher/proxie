@@ -1,0 +1,9 @@
+{
+    "public_url": "localhost:8080",
+
+    "cache_timeout": 5,
+
+    "blocked_sites": [
+        "www.google.com"
+    ]
+}
